@@ -1,5 +1,6 @@
 import * as Phaser from "phaser";
 import BlastNode from "../entities/BlastNode";
+import Enemy from "../entities/Enemy";
 
 export default class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Arc;
@@ -14,6 +15,9 @@ export default class GameScene extends Phaser.Scene {
   private currentPointerPos = new Phaser.Math.Vector2();
 
   private blastNodes: BlastNode[] = [];
+
+  private enemies: Enemy[] = [];
+  private spawnTimer = 0;
 
   private centerX = 0;
   private centerY = 0;
@@ -54,21 +58,82 @@ export default class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
+    // ===== CHARGE + DRAG =====
     if (this.isCharging) {
-      const chargeDuration = (this.time.now - this.chargeStartTime) / 1000;
+      const chargeDuration =
+        ((this.time.now - this.chargeStartTime) / 1000) * 1.5;
       const chargeAmount = Math.min(chargeDuration, 3);
 
       this.chargeText.setText(`Charge: ${chargeAmount.toFixed(2)}`);
       this.drawDragIndicator(chargeAmount);
     }
 
+    // ===== BLAST NODES =====
     this.blastNodes = this.blastNodes.filter((node) => {
       if (!node.active) return false;
       node.update(delta);
       return node.active;
     });
-  }
 
+    // ===== ENEMY SPAWNING =====
+    this.spawnTimer += delta;
+
+    if (this.spawnTimer > 1000) {
+      this.spawnTimer = 0;
+
+      const { width, height } = this.scale;
+      const side = Phaser.Math.Between(0, 3);
+
+      let x = 0;
+      let y = 0;
+
+      if (side === 0) {
+        x = Phaser.Math.Between(0, width);
+        y = -20;
+      }
+
+      if (side === 1) {
+        x = Phaser.Math.Between(0, width);
+        y = height + 20;
+      }
+
+      if (side === 2) {
+        x = -20;
+        y = Phaser.Math.Between(0, height);
+      }
+
+      if (side === 3) {
+        x = width + 20;
+        y = Phaser.Math.Between(0, height);
+      }
+
+      const enemy = new Enemy(this, x, y);
+      this.enemies.push(enemy);
+    }
+
+    // ===== ENEMY MOVEMENT =====
+    this.enemies.forEach((enemy) => {
+      enemy.update(this.centerX, this.centerY);
+    });
+
+    // ===== ENEMY COLLISION (KILL) =====
+    this.enemies = this.enemies.filter((enemy) => {
+      for (const node of this.blastNodes) {
+        const dist = Phaser.Math.Distance.Between(
+          enemy.x,
+          enemy.y,
+          node.x,
+          node.y,
+        );
+
+        if (dist < node.radius) {
+          enemy.destroy();
+          return false;
+        }
+      }
+      return true;
+    });
+  }
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
     this.isCharging = true;
     this.chargeStartTime = this.time.now;
