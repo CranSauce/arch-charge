@@ -1,7 +1,7 @@
 import * as Phaser from "phaser";
 
 export default class Enemy extends Phaser.GameObjects.Rectangle {
-  private speed = 0.7;
+  private speed = 0.4;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, 20, 20, 0xff5c5c);

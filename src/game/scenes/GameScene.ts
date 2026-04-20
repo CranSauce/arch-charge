@@ -275,7 +275,7 @@ export default class GameScene extends Phaser.Scene {
   ): void {
     const distance = Phaser.Math.Distance.Between(startX, startY, endX, endY);
 
-    const spacing = Math.max(18, 30 - chargeAmount * 4);
+    const spacing = 18;
     const count = Math.max(1, Math.floor(distance / spacing));
 
     for (let i = 0; i <= count; i++) {
