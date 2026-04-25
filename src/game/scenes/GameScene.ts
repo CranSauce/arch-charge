@@ -6,6 +6,7 @@ export default class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Arc;
   private arena!: Phaser.GameObjects.Arc;
   private chargeText!: Phaser.GameObjects.Text;
+  private killText!: Phaser.GameObjects.Text;
   private dragLine!: Phaser.GameObjects.Graphics;
 
   private isCharging = false;
@@ -15,9 +16,9 @@ export default class GameScene extends Phaser.Scene {
   private currentPointerPos = new Phaser.Math.Vector2();
 
   private blastNodes: BlastNode[] = [];
-
   private enemies: Enemy[] = [];
   private spawnTimer = 0;
+  private killCount = 0;
 
   private centerX = 0;
   private centerY = 0;
@@ -25,7 +26,7 @@ export default class GameScene extends Phaser.Scene {
   private arenaRadius = 160;
   private maxDragDistance = 160;
 
-  private worldOffset = new Phaser.Math.Vector2(0, 0);
+  private chargeSpeed = 1.5;
 
   constructor() {
     super("GameScene");
@@ -50,6 +51,11 @@ export default class GameScene extends Phaser.Scene {
       color: "#ffffff",
     });
 
+    this.killText = this.add.text(16, 50, "Kills: 0", {
+      fontSize: "20px",
+      color: "#ffffff",
+    });
+
     this.dragLine = this.add.graphics();
 
     this.input.on("pointerdown", this.handlePointerDown, this);
@@ -58,24 +64,21 @@ export default class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    // ===== CHARGE + DRAG =====
     if (this.isCharging) {
       const chargeDuration =
-        ((this.time.now - this.chargeStartTime) / 1000) * 1.5;
+        ((this.time.now - this.chargeStartTime) / 1000) * this.chargeSpeed;
       const chargeAmount = Math.min(chargeDuration, 3);
 
       this.chargeText.setText(`Charge: ${chargeAmount.toFixed(2)}`);
       this.drawDragIndicator(chargeAmount);
     }
 
-    // ===== BLAST NODES =====
     this.blastNodes = this.blastNodes.filter((node) => {
       if (!node.active) return false;
       node.update(delta);
       return node.active;
     });
 
-    // ===== ENEMY SPAWNING =====
     this.spawnTimer += delta;
 
     if (this.spawnTimer > 1000) {
@@ -111,29 +114,13 @@ export default class GameScene extends Phaser.Scene {
       this.enemies.push(enemy);
     }
 
-    // ===== ENEMY MOVEMENT =====
     this.enemies.forEach((enemy) => {
       enemy.update(this.centerX, this.centerY);
     });
 
-    // ===== ENEMY COLLISION (KILL) =====
-    this.enemies = this.enemies.filter((enemy) => {
-      for (const node of this.blastNodes) {
-        const dist = Phaser.Math.Distance.Between(
-          enemy.x,
-          enemy.y,
-          node.x,
-          node.y,
-        );
-
-        if (dist < node.radius) {
-          enemy.destroy();
-          return false;
-        }
-      }
-      return true;
-    });
+    this.resolveBlastCollisions();
   }
+
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
     this.isCharging = true;
     this.chargeStartTime = this.time.now;
@@ -148,9 +135,10 @@ export default class GameScene extends Phaser.Scene {
       this.currentPointerPos.set(pointer.x, pointer.y);
     } else {
       const angle = Math.atan2(dy, dx);
+
       this.currentPointerPos.set(
         this.centerX + Math.cos(angle) * this.maxDragDistance,
-        this.centerY + Math.sin(angle) * this.maxDragDistance,
+        this.centerY + Math.sin(angle) * this.maxDragDistance
       );
     }
   }
@@ -166,9 +154,10 @@ export default class GameScene extends Phaser.Scene {
       this.currentPointerPos.set(pointer.x, pointer.y);
     } else {
       const angle = Math.atan2(dy, dx);
+
       this.currentPointerPos.set(
         this.centerX + Math.cos(angle) * this.maxDragDistance,
-        this.centerY + Math.sin(angle) * this.maxDragDistance,
+        this.centerY + Math.sin(angle) * this.maxDragDistance
       );
     }
   }
@@ -176,7 +165,8 @@ export default class GameScene extends Phaser.Scene {
   private handlePointerUp(): void {
     if (!this.isCharging) return;
 
-    const chargeDuration = (this.time.now - this.chargeStartTime) / 1000;
+    const chargeDuration =
+      ((this.time.now - this.chargeStartTime) / 1000) * this.chargeSpeed;
     const chargeAmount = Math.min(chargeDuration, 3);
 
     const dx = this.currentPointerPos.x - this.centerX;
@@ -187,27 +177,36 @@ export default class GameScene extends Phaser.Scene {
 
     if (dragDistance > 0) {
       const direction = dragVector.normalize();
-      const shakeDuration = 80 + chargeAmount * 55;
-      const shakeIntensity = 0.003 + chargeAmount * 0.0035;
 
-      const destinationX = this.centerX + direction.x * dragDistance;
-      const destinationY = this.centerY + direction.y * dragDistance;
+      const dashX = direction.x * dragDistance;
+      const dashY = direction.y * dragDistance;
+
+      const destinationX = this.centerX + dashX;
+      const destinationY = this.centerY + dashY;
 
       this.spawnBlastTrail(
         this.centerX,
         this.centerY,
         destinationX,
         destinationY,
-        chargeAmount,
+        chargeAmount
       );
+
+      // Damage the whole teleport line BEFORE shifting enemies for the teleport illusion.
+      this.resolveBlastCollisions();
 
       this.spawnFlash(this.centerX, this.centerY, 16, 0.45);
       this.spawnFlash(destinationX, destinationY, 28 + chargeAmount * 6, 0.85);
 
+      const shakeDuration = 80 + chargeAmount * 55;
+      const shakeIntensity = 0.003 + chargeAmount * 0.0035;
+
       this.cameras.main.shake(shakeDuration, shakeIntensity);
 
-      this.worldOffset.x -= direction.x * dragDistance;
-      this.worldOffset.y -= direction.y * dragDistance;
+      this.enemies.forEach((enemy) => {
+        enemy.x -= dashX;
+        enemy.y -= dashY;
+      });
     }
 
     this.isCharging = false;
@@ -238,13 +237,13 @@ export default class GameScene extends Phaser.Scene {
       Phaser.Display.Color.ValueToColor(0x66e0ff),
       Phaser.Display.Color.ValueToColor(0xffffff),
       100,
-      chargeProgress * 100,
+      chargeProgress * 100
     );
 
     const glowColor = Phaser.Display.Color.GetColor(
       lineColor.r,
       lineColor.g,
-      lineColor.b,
+      lineColor.b
     );
 
     this.dragLine.lineStyle(lineWidth + 4, glowColor, 0.18);
@@ -271,11 +270,12 @@ export default class GameScene extends Phaser.Scene {
     startY: number,
     endX: number,
     endY: number,
-    chargeAmount: number,
+    chargeAmount: number
   ): void {
     const distance = Phaser.Math.Distance.Between(startX, startY, endX, endY);
 
-    const spacing = 18;
+    const radius = 6 + chargeAmount * 10;
+    const spacing = Math.max(6, radius * 0.65);
     const count = Math.max(1, Math.floor(distance / spacing));
 
     for (let i = 0; i <= count; i++) {
@@ -284,11 +284,46 @@ export default class GameScene extends Phaser.Scene {
       const x = Phaser.Math.Linear(startX, endX, t);
       const y = Phaser.Math.Linear(startY, endY, t);
 
-      const radius = 6 + chargeAmount * 10;
-
       const node = new BlastNode(this, x, y, radius);
       this.blastNodes.push(node);
     }
+  }
+
+  private resolveBlastCollisions(): void {
+    this.enemies = this.enemies.filter((enemy) => {
+      for (const node of this.blastNodes) {
+        const enemyHalfWidth = enemy.width / 2;
+        const enemyHalfHeight = enemy.height / 2;
+
+        const closestX = Phaser.Math.Clamp(
+          node.x,
+          enemy.x - enemyHalfWidth,
+          enemy.x + enemyHalfWidth
+        );
+
+        const closestY = Phaser.Math.Clamp(
+          node.y,
+          enemy.y - enemyHalfHeight,
+          enemy.y + enemyHalfHeight
+        );
+
+        const dist = Phaser.Math.Distance.Between(
+          node.x,
+          node.y,
+          closestX,
+          closestY
+        );
+
+        if (dist <= node.radius) {
+          enemy.destroy();
+          this.killCount++;
+          this.killText.setText(`Kills: ${this.killCount}`);
+          return false;
+        }
+      }
+
+      return true;
+    });
   }
 
   private spawnFlash(x: number, y: number, radius: number, alpha = 0.8): void {
